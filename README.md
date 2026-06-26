@@ -2,6 +2,8 @@
 
 **A lightweight multi-LLM coordinator inspired by [Trinity](https://arxiv.org/abs/2512.04695) and [Omnigent](https://github.com/omnigent-ai/omnigent).**
 
+📖 **[Architecture guide (GitHub Pages)](https://letslego.github.io/triverse/)** — Trinity, triverse, Omnigent, compressionX, and how they fit together.
+
 triverse orchestrates a pool of diverse LLMs through a **Thinker → Worker → Verifier** multi-turn protocol. A small coordination head selects which model plays which role each turn — without retraining the models in your pool. Harness backends are swappable (OpenAI, Anthropic, mock), so you can change providers without rewriting coordination logic.
 
 ```

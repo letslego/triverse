@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>triverse — Architecture Guide</title>
+  <meta name="description" content="How triverse, Trinity, Omnigent, and compressionX work together to orchestrate multi-LLM agents.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/style.css">
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#1a2230',
+        primaryTextColor: '#e8edf4',
+        primaryBorderColor: '#2a3548',
+        lineColor: '#5eead4',
+        secondaryColor: '#121820',
+        tertiaryColor: '#0b0f14',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      },
+      flowchart: { curve: 'basis', padding: 16 },
+    });
+  </script>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <a class="logo" href="#">triverse</a>
+      <nav>
+        <a href="#overview">Overview</a>
+        <a href="#trinity">Trinity</a>
+        <a href="#triverse">triverse</a>
+        <a href="#omnigent">Omnigent</a>
+        <a href="#compressionx">compressionX</a>
+        <a href="#combined">Combined</a>
+        <a href="https://github.com/letslego/triverse">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>Multi-LLM orchestration,<br>explained end to end</h1>
+      <p>
+        This guide explains <strong>Trinity</strong> (the research), <strong>triverse</strong> (the coordinator),
+        <strong>Omnigent</strong> (the harness pattern), and <strong>compressionX</strong> (context compression) —
+        and how they compose into one agent stack.
+      </p>
+      <div class="badges">
+        <span class="badge trinity">Trinity · arxiv:2512.04695</span>
+        <span class="badge triverse">triverse</span>
+        <span class="badge omnigent">Omnigent pattern</span>
+        <span class="badge compression">compressionX</span>
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <section id="overview">
+      <h2>Overview</h2>
+      <p class="lead">
+        Modern agents don't rely on a single model. They route work across a <em>pool</em> of LLMs,
+        run multi-turn reasoning, and accumulate context that grows without bound. Four ideas address
+        different layers of that problem.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Project / paper</th><th>Problem solved</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Coordination protocol</strong></td>
+            <td><a href="#trinity">Trinity</a></td>
+            <td>Who does what, when — Thinker, Worker, Verifier across turns</td>
+          </tr>
+          <tr>
+            <td><strong>Runtime coordinator</strong></td>
+            <td><a href="#triverse">triverse</a></td>
+            <td>Practical multi-turn loop + routing head + YAML agent pool</td>
+          </tr>
+          <tr>
+            <td><strong>Harness / backend swap</strong></td>
+            <td><a href="#omnigent">Omnigent</a> pattern</td>
+            <td>Same orchestration, different providers — no rewrite</td>
+          </tr>
+          <tr>
+            <td><strong>Context compression</strong></td>
+            <td><a href="#compressionx">compressionX</a></td>
+            <td>Shrink transcripts &amp; tool output; keep errors &amp; retrieval paths</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- TRINITY -->
+    <section id="trinity">
+      <h2>What is Trinity?</h2>
+      <p class="lead">
+        <a href="https://arxiv.org/abs/2512.04695">Trinity: An Evolved LLM Coordinator</a> (Sakana AI, 2025)
+        shows that a <em>tiny</em> coordinator (~20K trainable parameters) can orchestrate a pool of
+        frontier LLMs and beat any single model in the pool — without merging weights or fine-tuning workers.
+      </p>
+
+      <div class="card">
+        <strong>Core insight</strong>
+        <ul>
+          <li>A small language model's <strong>hidden state</strong> encodes enough context to route decisions.</li>
+          <li>A lightweight linear <strong>head</strong> picks <code>(LLM, role)</code> each turn.</li>
+          <li>Three <strong>roles</strong> offload skill: Thinker plans, Worker executes, Verifier accepts or revises.</li>
+          <li>The head is trained with <strong>sep-CMA-ES</strong> (derivative-free evolution), not RL.</li>
+        </ul>
+      </div>
+
+      <h3>Trinity coordination loop</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    Q[User query] --> OBS[Router observation<br/>query + prior worker thoughts]
+    OBS --> SLM[Qwen3-0.6B backbone<br/>penultimate hidden state]
+    SLM --> HEAD[Linear head ~10K params<br/>agent logits + role logits]
+    HEAD --> PICK[Pick LLM + role]
+
+    PICK -->|Thinker| T[Meta strategy<br/>decomposition, critique]
+    PICK -->|Worker| W[Concrete solution<br/>code, math, answer]
+    PICK -->|Verifier| V{ACCEPT or REVISE?}
+
+    T --> OBS
+    W --> OBS
+    V -->|REVISE| OBS
+    V -->|ACCEPT| DONE[Return final answer]
+    PICK -->|max turns| DONE
+
+    subgraph pool [LLM pool — unchanged weights]
+        M1[GPT]
+        M2[Claude]
+        M3[Gemini]
+        M4[Open models...]
+    end
+    PICK --> pool
+        </pre>
+      </div>
+
+      <h3>Tri-role contracts</h3>
+      <table>
+        <thead><tr><th>Role</th><th>Job</th><th>Updates router state?</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Thinker</strong></td><td>High-level plan, subgoals, critique</td><td>No (suggests next role)</td></tr>
+          <tr><td><strong>Worker</strong></td><td>Derivation, code, numerical result</td><td>Yes — thought appended to obs</td></tr>
+          <tr><td><strong>Verifier</strong></td><td>Correctness &amp; completeness check</td><td>No — ACCEPT terminates</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Training surface</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+    subgraph trainable [~19.5K trainable params]
+        SVF[SVF offsets<br/>9 weight matrices]
+        LH[Linear head<br/>7 agents + 3 roles]
+    end
+    ES[sep-CMA-ES] -->|sample population| trainable
+    trainable -->|rollout| LOOP[Multi-turn coordination]
+    LOOP -->|Bernoulli reward| ES
+        </pre>
+      </div>
+    </section>
+
+    <!-- TRIVERSE -->
+    <section id="triverse">
+      <h2>How triverse works</h2>
+      <p class="lead">
+        <a href="https://github.com/letslego/triverse">triverse</a> implements Trinity's <strong>protocol</strong>
+        and <strong>decision surface</strong> (agent × role per turn) as a deployable Python library —
+        with a transparent heuristic router instead of a CMA-ES-trained Qwen head.
+      </p>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    APP[Your application] -->|query| COORD[Coordinator]
+
+    subgraph triverse [triverse]
+        COORD --> TR[Transcript<br/>query + turn outputs]
+        TR --> ROUTER[CoordinationRouter<br/>phase + domain + strengths]
+        ROUTER -->|agent_id, role| ROLES[Role prompts<br/>Thinker / Worker / Verifier]
+        ROLES --> POOL[ModelPool YAML]
+        POOL --> HARNESS[Harness layer]
+        HARNESS -->|response| POST[Post-process + verdict parse]
+        POST --> TR
+        POST -->|Verifier ACCEPT| OUT[CoordinationResult]
+    end
+
+    HARNESS --> OPENAI[OpenAI harness]
+    HARNESS --> ANTH[Anthropic harness]
+    HARNESS --> MOCK[Mock harness]
+        </pre>
+      </div>
+
+      <h3>Per-turn sequence</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+    participant R as Router
+    participant C as compressionX
+    participant H as Harness
+    participant T as Transcript
+
+    R->>T: render state
+    T->>C: compress older turns
+    C->>H: role prompt + transcript
+    H-->>T: agent response
+    T->>C: compress large output
+    alt Verifier ACCEPT
+        T-->>R: stop
+    else more turns
+        R->>R: next agent × role
+    end
+        </pre>
+      </div>
+
+      <h3>Router scoring (heuristic head)</h3>
+      <p class="lead">Each turn scores every <code>(agent_id, role)</code> pair:</p>
+      <ul>
+        <li><strong>Phase bias</strong> — Thinker early, Worker mid, Verifier late</li>
+        <li><strong>Domain signals</strong> — math / code / reasoning keywords in query</li>
+        <li><strong>Agent strengths</strong> — YAML-declared affinities</li>
+        <li><strong>Diversity penalty</strong> — avoid repeating the same agent</li>
+      </ul>
+
+      <pre><code>from triverse import Coordinator, CoordConfig
+from triverse.pool import ModelPool
+
+result = Coordinator(ModelPool.default_demo()).run(
+    "Implement binary search and verify correctness."
+)
+print(result.answer, result.total_turns)</code></pre>
+    </section>
+
+    <!-- OMNIGENT -->
+    <section id="omnigent">
+      <h2>Omnigent — the meta-harness pattern</h2>
+      <p class="lead">
+        <a href="https://github.com/omnigent-ai/omnigent">Omnigent</a> is an open-source agent framework and
+        <strong>meta-harness</strong>: one orchestration layer over Claude Code, Codex, Cursor, Pi, and custom agents.
+        triverse borrows its core idea — <em>swap backends without rewriting coordination</em>.
+      </p>
+
+      <div class="card">
+        <strong>What Omnigent provides (conceptually)</strong>
+        <ul>
+          <li>Uniform agent runtime — YAML-defined agents with pluggable <code>harness</code> kinds</li>
+          <li>Multi-agent sessions — supervise several agents in one workflow</li>
+          <li>Policy &amp; sandboxing — govern tool use and spend</li>
+          <li>Any model path — API keys, subscriptions, gateways, local inference</li>
+        </ul>
+      </div>
+
+      <h3>Omnigent architecture</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    USER[User / team] --> UI[Web UI / CLI / phone]
+    UI --> SERVER[Omnigent server]
+
+    subgraph meta [Meta-harness layer]
+        SERVER --> ORCH[Session orchestrator]
+        ORCH --> POL[Policies<br/>approve / budget / sandbox]
+        ORCH --> AGENTS[Agent definitions YAML]
+    end
+
+    AGENTS --> H1[claude-sdk harness]
+    AGENTS --> H2[codex harness]
+    AGENTS --> H3[cursor harness]
+    AGENTS --> H4[custom harness]
+
+    H1 --> CC[Claude Code]
+    H2 --> CX[Codex]
+    H3 --> CR[Cursor agent]
+    H4 --> CUSTOM[Your runtime]
+
+    subgraph triverse_mapping [triverse equivalent]
+        POOL2[ModelPool] --> TH[Harness.complete]
+        TH --> PROVIDERS[OpenAI / Anthropic / mock]
+    end
+        </pre>
+      </div>
+
+      <h3>triverse harness interface</h3>
+      <p class="lead">Same pattern, minimal surface:</p>
+      <pre><code>class Harness(ABC):
+    def complete(self, prompt: str, *, model: str, temperature: float) -> HarnessResponse: ...
+
+# YAML agent pool
+agents:
+  - id: gpt
+    harness: openai
+    model: gpt-4o
+    strengths: [reasoning, coding]</code></pre>
+    </section>
+
+    <!-- COMPRESSIONX -->
+    <section id="compressionx">
+      <h2>compressionX — context compression</h2>
+      <p class="lead">
+        Multi-turn coordination grows context fast: tool JSON, logs, file reads, prior turns.
+        <strong>compressionX</strong> sits in the pipeline and shrinks payloads before they reach any LLM —
+        preserving errors, structure, and a path back to originals via <strong>CXR</strong>.
+      </p>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    IN[Tool outputs · logs · files · messages] --> PIPE[Message pipeline]
+
+    subgraph compressionx [compressionX — local only]
+        PIPE --> ROUTER[ContentRouter]
+        ROUTER -->|JSON arrays| JC[JsonCrusher<br/>first/last + errors]
+        ROUTER -->|build logs| LC[LogCompressor<br/>severity + stacks]
+        ROUTER -->|source code| CC[CodeCompressor<br/>signatures + errors]
+        ROUTER -->|prose| TC[TextCompressor<br/>dedupe paragraphs]
+        JC & LC & CC & TC --> CXR[(CXR Store<br/>~/.compressionx/cxr.db)]
+        CXR --> MARK["&lt;&lt;cxr:key ...&gt;&gt; markers"]
+    end
+
+    MARK --> OUT[Compressed context]
+    OUT --> LLM[LLM provider]
+
+    RETRIEVE[compressionx retrieve key] --> CXR
+        </pre>
+      </div>
+
+      <h3>What each compressor keeps</h3>
+      <table>
+        <thead><tr><th>Compressor</th><th>Triggers on</th><th>Preserves</th></tr></thead>
+        <tbody>
+          <tr><td>JsonCrusher</td><td>Large JSON arrays</td><td>First/last items, errors, shape dedupe</td></tr>
+          <tr><td>LogCompressor</td><td>CI / pytest / build output</td><td>ERROR lines, stack traces, head/tail</td></tr>
+          <tr><td>CodeCompressor</td><td>Source &amp; stack traces</td><td>Signatures, error lines, boundaries</td></tr>
+          <tr><td>TextCompressor</td><td>Long prose</td><td>Deduped paragraphs, trimmed boilerplate</td></tr>
+        </tbody>
+      </table>
+
+      <h3>triverse integration points</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart LR
+    subgraph hooks [compression hooks in Coordinator]
+        A[Before harness call<br/>compress older transcript turns]
+        B[After agent response<br/>compress large turn output]
+    end
+    A --> CX[ContextCompressor]
+    B --> CX
+    CX --> CR[compressionX ContentRouter]
+        </pre>
+      </div>
+    </section>
+
+    <!-- COMBINED -->
+    <section id="combined">
+      <h2>How it all fits together</h2>
+      <p class="lead">
+        Trinity defines <em>what</em> multi-LLM coordination looks like. triverse runs it.
+        Omnigent's harness pattern wires providers. compressionX keeps the transcript bounded.
+      </p>
+
+      <div class="diagram">
+        <pre class="mermaid">
+flowchart TB
+    USER([User / agent app]) --> QUERY[Query + tool context]
+
+    subgraph stack [Agent stack]
+        direction TB
+
+        subgraph coord [① Trinity protocol — triverse Coordinator]
+            direction LR
+            RT[Router head<br/>agent × role]
+            LOOP[Turn loop max K]
+            ROLES2[T / W / V roles]
+            RT --> LOOP --> ROLES2
+        end
+
+        subgraph compress [② compressionX layer]
+            direction LR
+            CP[Compress prior turns]
+            CO[Compress outputs]
+            CXR2[(CXR retrieve)]
+        end
+
+        subgraph harness [③ Omnigent-style harnesses]
+            direction LR
+            HP[ModelPool YAML]
+            HOPEN[OpenAI]
+            HANTH[Anthropic]
+            HMOCK[Mock / custom]
+        end
+
+        QUERY --> coord
+        coord <-->|transcript| compress
+        coord --> harness
+    end
+
+    harness --> POOL2[Frontier LLM pool<br/>GPT · Claude · Gemini · open models]
+    POOL2 -->|responses| coord
+    coord -->|Verifier ACCEPT| ANSWER[Final answer + stats<br/>tokens_saved · turns · strategies]
+
+    style coord fill:#1a2230,stroke:#60a5fa
+    style compress fill:#1a2230,stroke:#34d399
+    style harness fill:#1a2230,stroke:#fbbf24
+        </pre>
+      </div>
+
+      <h3>Data flow (one turn)</h3>
+      <div class="diagram">
+        <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant TV as triverse Coordinator
+    participant CX as compressionX
+    participant R as Router
+    participant H as Harness
+    participant L as LLM pool
+
+    U->>TV: query
+    TV->>R: transcript state
+    R-->>TV: (agent, Thinker|Worker|Verifier)
+    TV->>CX: compress older turns
+    CX-->>TV: lean transcript
+    TV->>H: role prompt + transcript
+    H->>L: completion
+    L-->>H: response
+    H-->>TV: raw output
+    TV->>CX: compress if large
+    CX-->>TV: stored turn + CXR marker
+    alt Verifier ACCEPT
+        TV-->>U: answer
+    else continue
+        TV->>R: next turn
+    end
+        </pre>
+      </div>
+
+      <h3>When to use what</h3>
+      <table>
+        <thead><tr><th>Need</th><th>Reach for</th></tr></thead>
+        <tbody>
+          <tr><td>Faithful Sakana Trinity / learned routing</td><td><a href="https://github.com/trotsky1997/OpenFugu">OpenFugu</a> + Qwen3 checkpoint</td></tr>
+          <tr><td>Deploy T/W/V coordination today, no GPU</td><td><strong>triverse</strong></td></tr>
+          <tr><td>Swap Claude ↔ OpenAI ↔ local without rewrite</td><td>triverse <code>Harness</code> + YAML pool</td></tr>
+          <tr><td>Long runs with logs, JSON tools, big files</td><td><strong>compressionX</strong> (wired into triverse)</td></tr>
+          <tr><td>Full desktop agent OS with policies</td><td><strong>Omnigent</strong></td></tr>
+        </tbody>
+      </table>
+
+      <div class="card">
+        <strong>Get started</strong>
+        <pre><code>git clone https://github.com/letslego/triverse.git
+cd triverse
+pip install -e .
+pip install -e ../compressionX   # optional, enables compression
+triverse demo</code></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      <a href="https://github.com/letslego/triverse">triverse</a> · MIT License ·
+      Inspired by <a href="https://arxiv.org/abs/2512.04695">Trinity</a>,
+      <a href="https://github.com/omnigent-ai/omnigent">Omnigent</a>, and compressionX
+    </p>
+  </footer>
+</body>
+</html>
