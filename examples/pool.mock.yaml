@@ -1,0 +1,16 @@
+# Demo pool using mock harnesses (no API keys required)
+agents:
+  - id: strategist
+    harness: mock
+    model: mock-think
+    strengths: [reasoning]
+
+  - id: coder
+    harness: mock
+    model: mock-code
+    strengths: [coding]
+
+  - id: checker
+    harness: mock
+    model: mock-verify
+    strengths: [verification]
