@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "triverse"
-version = "0.1.0"
+version = "0.2.0"
 description = "Lightweight multi-LLM coordinator inspired by Trinity — Thinker, Worker, Verifier roles with swappable harnesses"
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,7 +36,8 @@ dependencies = [
 [project.optional-dependencies]
 openai = ["openai>=1.0.0"]
 anthropic = ["anthropic>=0.25.0"]
-all = ["triverse[openai,anthropic]"]
+compression = ["compressionx", "tiktoken>=0.5.0"]
+all = ["triverse[openai,anthropic,compression]"]
 dev = ["pytest>=7.0.0", "triverse[all]"]
 
 [project.scripts]

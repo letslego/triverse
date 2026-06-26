@@ -32,17 +32,25 @@ def demo() -> None:
     console.print(Panel(result.answer, title="Final answer", border_style="green"))
     _print_turns(result.turns)
     console.print(f"\nTerminated by: [bold]{result.terminated_by}[/] ({result.total_turns} turns)")
+    if result.compressions_applied:
+        console.print(
+            f"compressionX: saved [bold]{result.tokens_saved}[/] tokens "
+            f"({result.compressions_applied} compressions, "
+            f"strategies: {', '.join(result.compression_strategies)})"
+        )
 
 
 @cli.command()
 @click.argument("query")
 @click.option("--pool", "pool_path", type=click.Path(exists=True), help="YAML agent pool config")
 @click.option("--max-turns", default=5, show_default=True)
+@click.option("--no-compress", is_flag=True, help="Disable compressionX integration")
 @click.option("--json-out", is_flag=True, help="Emit JSON result")
-def run(query: str, pool_path: str | None, max_turns: int, json_out: bool) -> None:
+def run(query: str, pool_path: str | None, max_turns: int, no_compress: bool, json_out: bool) -> None:
     """Coordinate a query across the agent pool."""
     pool = ModelPool.from_yaml(pool_path) if pool_path else ModelPool.default_demo()
-    coord = Coordinator(pool, CoordConfig(max_turns=max_turns))
+    compression = None if no_compress else CoordConfig().compression
+    coord = Coordinator(pool, CoordConfig(max_turns=max_turns, compression=compression))
     result = coord.run(query)
 
     if json_out:

@@ -47,12 +47,15 @@ triverse makes that protocol **practical today**:
 
 [Omnigent](https://github.com/omnigent-ai/omnigent) contributes the **meta-harness** pattern: a uniform `Harness.complete()` interface lets you swap OpenAI, Anthropic, or custom backends via YAML — no coordination rewrite.
 
+**[compressionX](../compressionX)** (sibling package) compresses growing transcripts and turn outputs — JsonCrusher for tool results, LogCompressor for build output, CXR for reversible retrieval — so multi-turn coordination stays within token budgets.
+
 ## Installation
 
 ```bash
 pip install -e .
 
-# With LLM provider SDKs
+# With LLM provider SDKs + compressionX
+pip install -e ../compressionX   # from monorepo sibling
 pip install -e ".[all]"
 
 # Development
@@ -84,13 +87,43 @@ result = coord.run(
 
 print(result.answer)
 print(f"Completed in {result.total_turns} turns via {result.terminated_by}")
+print(f"Saved {result.tokens_saved} tokens via compressionX")
+```
+
+### With compressionX (default)
+
+Compression is **on by default** when `compressionx` is installed. Each turn:
+
+1. **Before harness call** — older transcript turns are compressed (`protect_recent_turns=1` keeps the latest intact)
+2. **After agent response** — large turn outputs are compressed before appending
+
+```python
+from triverse import Coordinator, CoordConfig, CompressionConfig
+
+coord = Coordinator(
+    pool,
+    CoordConfig(
+        compression=CompressionConfig(
+            target_ratio=0.25,       # aggressive for logs/tool output
+            compress_prompt=True,
+            compress_outputs=True,
+            enable_cxr=True,         # originals in ~/.compressionx/cxr.db
+        ),
+    ),
+)
+```
+
+Disable with `compression=None` or CLI `--no-compress`. Without compressionX installed, coordination works unchanged (graceful fallback).
+
+```bash
+python examples/compressed_coordination.py
 ```
 
 ### CLI
 
 ```bash
 triverse run "Explain quantum tunneling and verify the explanation"
-triverse run "Debug this API" --pool my_pool.yaml --max-turns 4 --json-out
+triverse run "Debug this API" --pool my_pool.yaml --max-turns 4 --no-compress
 triverse init-pool agents.yaml   # generate starter config
 ```
 
@@ -161,6 +194,7 @@ pool.register_harness("my-backend", MyHarness())
 triverse/
 ├── triverse/
 │   ├── coordinator.py   # Main Trinity loop
+│   ├── compression.py   # compressionX adapter
 │   ├── router.py        # Coordination head
 │   ├── roles.py         # T/W/V prompts
 │   ├── transcript.py    # Multi-turn state

@@ -31,6 +31,19 @@ class AgentSpec(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class CompressionConfig(BaseModel):
+    """compressionX settings for triverse coordination."""
+
+    enabled: bool = True
+    model: str = "gpt-4o"
+    target_ratio: float = Field(default=0.35, ge=0.05, le=1.0)
+    enable_cxr: bool = True
+    compress_prompt: bool = True
+    compress_outputs: bool = True
+    protect_recent_turns: int = 1
+    min_tokens: int = 120
+
+
 class CoordConfig(BaseModel):
     """Coordinator runtime configuration."""
 
@@ -39,6 +52,7 @@ class CoordConfig(BaseModel):
     router_temperature: float = 0.3
     seed: int | None = None
     verbose: bool = False
+    compression: CompressionConfig | None = Field(default_factory=CompressionConfig)
 
 
 class TurnRecord(BaseModel):
@@ -61,3 +75,6 @@ class CoordinationResult(BaseModel):
     turns: list[TurnRecord]
     terminated_by: str
     total_turns: int
+    tokens_saved: int = 0
+    compressions_applied: int = 0
+    compression_strategies: list[str] = Field(default_factory=list)

@@ -12,3 +12,4 @@ venv/
 .env
 *.db
 .DS_Store
+benchmarks/last_run.json
