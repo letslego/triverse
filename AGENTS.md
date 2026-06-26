@@ -2,6 +2,8 @@
 
 Lightweight multi-LLM coordinator. Trinity-inspired T/W/V protocol; Omnigent-style harness swapping; compressionX for transcript compression.
 
+**Docs:** https://letslego.github.io/triverse/
+
 ## Commands
 
 ```bash
